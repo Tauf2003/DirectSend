@@ -8,12 +8,14 @@ class TransferEngine {
   constructor() {
     // Chunk size: 256KB for higher throughput with modern browsers
     this.CHUNK_SIZE = 256 * 1024;
+    this.PROGRESS_UPDATE_INTERVAL_MS = 200;
 
     // Active outgoing transfers: transferId -> { file, state, ... }
     this.outgoing = new Map();
 
     // Active incoming transfers: transferId -> { meta, chunks, state, ... }
     this.incoming = new Map();
+    this.pendingChunkByPeer = new Map(); // peerId -> { transferId, index }
 
     // Callbacks
     this.onTransferProgress = null;   // (transferId, progress) => void
@@ -60,6 +62,7 @@ class TransferEngine {
       startTime: Date.now(),
       bytesSent: 0,
       speedSamples: [],
+      lastProgressAt: 0,
       direction: 'outgoing'
     };
 
@@ -162,7 +165,7 @@ class TransferEngine {
       }
 
       // Report progress
-      if (this.onTransferProgress) {
+      if (this.onTransferProgress && this._shouldEmitProgress(transfer, now)) {
         this.onTransferProgress(transferId, {
           percent: (transfer.currentChunk / transfer.totalChunks) * 100,
           bytesSent: transfer.bytesSent,
@@ -251,7 +254,7 @@ class TransferEngine {
       startTime: Date.now(),
       bytesReceived: 0,
       speedSamples: [],
-      pendingChunkMeta: null,
+      lastProgressAt: 0,
       direction: 'incoming'
     };
 
@@ -272,30 +275,34 @@ class TransferEngine {
    */
   _prepareForChunk(peerId, chunkMeta) {
     const transfer = this.incoming.get(chunkMeta.transferId);
-    if (!transfer) return;
-    transfer.pendingChunkMeta = chunkMeta;
+    if (!transfer) {
+      return;
+    }
+
+    this.pendingChunkByPeer.set(peerId, {
+      transferId: chunkMeta.transferId,
+      index: chunkMeta.index,
+    });
   }
 
   /**
    * Handle incoming binary chunk data
    */
   async _handleChunkData(peerId, data) {
-    // Find the transfer with pending chunk meta from this peer
-    let transfer = null;
-    for (const [, t] of this.incoming) {
-      if (t.fromPeerId === peerId && t.pendingChunkMeta) {
-        transfer = t;
-        break;
-      }
-    }
-
-    if (!transfer || !transfer.pendingChunkMeta) {
+    const pending = this.pendingChunkByPeer.get(peerId);
+    if (!pending) {
       console.warn('[Transfer] Received chunk data without pending meta');
       return;
     }
 
-    const chunkMeta = transfer.pendingChunkMeta;
-    transfer.pendingChunkMeta = null;
+    const transfer = this.incoming.get(pending.transferId);
+    this.pendingChunkByPeer.delete(peerId);
+
+    if (!transfer) {
+      return;
+    }
+
+    const chunkIndex = pending.index;
 
     if (transfer.state === 'cancelled') return;
 
@@ -314,7 +321,7 @@ class TransferEngine {
       }
     }
 
-    transfer.chunks[chunkMeta.index] = chunkData;
+    transfer.chunks[chunkIndex] = chunkData;
     transfer.receivedChunks++;
     transfer.bytesReceived += chunkData.byteLength;
 
@@ -326,7 +333,7 @@ class TransferEngine {
     }
 
     // Report progress
-    if (this.onTransferProgress) {
+    if (this.onTransferProgress && this._shouldEmitProgress(transfer, now)) {
       this.onTransferProgress(transfer.id, {
         percent: (transfer.receivedChunks / transfer.totalChunks) * 100,
         bytesSent: transfer.bytesReceived,
@@ -411,6 +418,12 @@ class TransferEngine {
       incoming.state = 'cancelled';
       incoming.chunks = null;
       this.incoming.delete(transferId);
+
+      for (const [peerId, pending] of this.pendingChunkByPeer) {
+        if (pending.transferId === transferId) {
+          this.pendingChunkByPeer.delete(peerId);
+        }
+      }
     }
 
     if (this.onTransferStateChange) {
@@ -460,6 +473,19 @@ class TransferEngine {
 
     const remaining = transfer.fileSize - (transfer.bytesSent || transfer.bytesReceived || 0);
     return remaining / speed;
+  }
+
+  _shouldEmitProgress(transfer, now) {
+    const isComplete =
+      (transfer.direction === 'outgoing' && transfer.currentChunk >= transfer.totalChunks) ||
+      (transfer.direction === 'incoming' && transfer.receivedChunks >= transfer.totalChunks);
+
+    if (isComplete || now - transfer.lastProgressAt >= this.PROGRESS_UPDATE_INTERVAL_MS) {
+      transfer.lastProgressAt = now;
+      return true;
+    }
+
+    return false;
   }
 
   /**
