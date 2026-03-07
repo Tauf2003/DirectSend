@@ -161,7 +161,18 @@ class PeerManager {
 
         const peer = this.peers.get(fromPeerId);
         if (peer) {
-          await peer.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+          if (peer.pc.signalingState !== 'have-local-offer') {
+            console.warn(
+              `[RTC] Ignoring stale answer from ${fromPeerId} in state ${peer.pc.signalingState}`
+            );
+            break;
+          }
+
+          try {
+            await peer.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+          } catch (error) {
+            console.warn(`[RTC] Failed to apply answer from ${fromPeerId}:`, error);
+          }
         }
         break;
       }
@@ -207,7 +218,11 @@ class PeerManager {
       } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         peerInfo.state = 'disconnected';
         setTimeout(() => {
-          if (this.peers.has(peerId) && this.peers.get(peerId).state === 'disconnected') {
+          if (
+            this.peers.has(peerId) &&
+            this.peers.get(peerId).state === 'disconnected' &&
+            this._shouldInitiateConnection(peerId)
+          ) {
             console.log(`[RTC] Attempting to reconnect with ${peerId}`);
             this._createPeerConnection(peerId, true);
           }
@@ -256,6 +271,14 @@ class PeerManager {
     dc.onerror = (error) => {
       console.error(`[DC] Data channel error with ${peerId}:`, error);
     };
+  }
+
+  _shouldInitiateConnection(peerId) {
+    if (!this.myPeerId) {
+      return true;
+    }
+
+    return String(this.myPeerId) < String(peerId);
   }
 
   async sendToPeer(peerId, data) {
