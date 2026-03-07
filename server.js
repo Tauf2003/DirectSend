@@ -28,6 +28,41 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ─── Room Management ───────────────────────────────────────────
 const rooms = new Map(); // roomId -> Map<peerId, ws>
 
+function buildIceServers() {
+  const defaultStunServers = [
+    'stun:stun.l.google.com:19302',
+    'stun:stun1.l.google.com:19302',
+    'stun:stun2.l.google.com:19302',
+    'stun:stun3.l.google.com:19302',
+    'stun:stun4.l.google.com:19302',
+  ];
+
+  const stunServers = (process.env.STUN_SERVERS || defaultStunServers.join(','))
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+
+  const iceServers = stunServers.map((url) => ({ urls: url }));
+
+  const turnUrls = (process.env.TURN_URLS || '')
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean);
+
+  const turnUsername = process.env.TURN_USERNAME || '';
+  const turnCredential = process.env.TURN_CREDENTIAL || '';
+
+  if (turnUrls.length > 0 && turnUsername && turnCredential) {
+    iceServers.push({
+      urls: turnUrls,
+      username: turnUsername,
+      credential: turnCredential,
+    });
+  }
+
+  return iceServers;
+}
+
 // Clean up empty rooms periodically
 setInterval(() => {
   for (const [roomId, peers] of rooms) {
@@ -49,6 +84,11 @@ app.get('/api/create-room', (req, res) => {
 // Health endpoint for Render checks and quick diagnostics
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, service: 'directsend' });
+});
+
+// ICE config endpoint for WebRTC (supports TURN via environment vars)
+app.get('/api/ice-config', (req, res) => {
+  res.json({ iceServers: buildIceServers() });
 });
 
 // Explicit root route

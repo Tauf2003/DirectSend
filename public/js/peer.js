@@ -29,7 +29,8 @@ class PeerManager {
   }
 
   /**
-   * Connect to signaling server and join a room
+      this.iceConfigLoaded = false;
+      this.rtcConfig = {
    */
   connect(roomId) {
     this.roomId = roomId;
@@ -45,7 +46,33 @@ class PeerManager {
     };
 
     this.ws.onmessage = (event) => {
+      this._ensureIceConfig().finally(() => {
+        this._connectWebSocket(roomId);
+      });
       const msg = JSON.parse(event.data);
+
+    async _ensureIceConfig() {
+      if (this.iceConfigLoaded) {
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/ice-config', { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error(`ICE config request failed: ${res.status}`);
+        }
+        const data = await res.json();
+        if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+          this.rtcConfig = { iceServers: data.iceServers };
+          console.log('[RTC] Loaded ICE config from server');
+        }
+        this.iceConfigLoaded = true;
+      } catch (error) {
+        console.warn('[RTC] Using default STUN config:', error);
+      }
+    }
+
+    _connectWebSocket(roomId) {
       this._handleSignal(msg);
     };
 
