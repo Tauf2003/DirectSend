@@ -46,6 +46,16 @@ app.get('/api/create-room', (req, res) => {
   res.json({ roomId });
 });
 
+// Health endpoint for Render checks and quick diagnostics
+app.get('/api/health', (req, res) => {
+  res.json({ ok: true, service: 'directsend' });
+});
+
+// Explicit root route
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 // Check if room exists
 app.get('/api/room/:roomId', (req, res) => {
   const { roomId } = req.params;
