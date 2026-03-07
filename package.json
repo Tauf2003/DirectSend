@@ -1,0 +1,19 @@
+{
+  "name": "directsend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["p2p", "file-transfer", "webrtc"],
+  "author": "",
+  "license": "ISC",
+  "description": "Secure P2P file transfer platform - files move directly between devices via WebRTC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "qrcode": "^1.5.4",
+    "uuid": "^13.0.0",
+    "ws": "^8.19.0"
+  }
+}

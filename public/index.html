@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DirectSend - Secure P2P File Transfer</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ─── Header ──────────────────────────────── -->
+    <header>
+      <div class="logo" onclick="navigateHome()">
+        <span class="logo-icon">⚡</span>
+        <span class="logo-text">DirectSend</span>
+      </div>
+      <div class="header-badge">P2P Encrypted</div>
+    </header>
+
+    <!-- ─── Landing / Home ──────────────────────── -->
+    <section id="home-view" class="view active">
+      <div class="hero">
+        <h1>Send files <span class="gradient-text">directly</span></h1>
+        <p class="subtitle">No server storage. No size limits. Peer-to-peer encrypted transfer right in your browser.</p>
+        
+        <div class="action-cards">
+          <div class="action-card" onclick="createRoom()">
+            <div class="card-icon">🚀</div>
+            <h3>Create Room</h3>
+            <p>Start a secure room and share the link</p>
+          </div>
+          <div class="action-card" onclick="showJoinDialog()">
+            <div class="card-icon">🔗</div>
+            <h3>Join Room</h3>
+            <p>Enter a room code to connect</p>
+          </div>
+        </div>
+
+        <div id="join-dialog" class="join-dialog hidden">
+          <div class="input-group">
+            <input type="text" id="join-room-input" placeholder="Enter room code (e.g. ABCD123)" maxlength="7" autocomplete="off" />
+            <button onclick="joinRoomFromInput()" class="btn-primary">Join</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature">
+          <div class="feature-icon">🔒</div>
+          <h4>End-to-End Encrypted</h4>
+          <p>Files encrypted before transfer using AES-256-GCM</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">📱</div>
+          <h4>QR Code Connect</h4>
+          <p>Scan QR to instantly join from mobile</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">⏸️</div>
+          <h4>Pause & Resume</h4>
+          <p>Pause transfers and resume where you left off</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">📦</div>
+          <h4>20GB+ Files</h4>
+          <p>Stream large files via chunked transfer</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">👥</div>
+          <h4>Multi-Device</h4>
+          <p>Send to multiple devices simultaneously</p>
+        </div>
+        <div class="feature">
+          <div class="feature-icon">🔄</div>
+          <h4>Auto Reconnect</h4>
+          <p>Seamlessly reconnect on network drops</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── Room View ───────────────────────────── -->
+    <section id="room-view" class="view">
+      <div class="room-container">
+        <!-- Room Header -->
+        <div class="room-header">
+          <div class="room-info">
+            <h2>Room: <span id="room-code" class="room-code"></span></h2>
+            <div class="room-status">
+              <span id="connection-status" class="status-dot"></span>
+              <span id="connection-text">Connecting...</span>
+            </div>
+          </div>
+          <div class="room-actions">
+            <button onclick="copyRoomLink()" class="btn-icon" title="Copy Link">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+            </button>
+            <button onclick="showQRCode()" class="btn-icon" title="QR Code">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/><rect x="18" y="14" width="3" height="3"/><rect x="14" y="18" width="3" height="3"/><rect x="18" y="18" width="3" height="3"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- QR Modal -->
+        <div id="qr-modal" class="modal hidden">
+          <div class="modal-content">
+            <button class="modal-close" onclick="closeQRModal()">&times;</button>
+            <h3>Scan to Join</h3>
+            <img id="qr-image" src="" alt="QR Code" />
+            <p id="qr-url" class="qr-url"></p>
+          </div>
+        </div>
+
+        <!-- Peers List -->
+        <div class="peers-section">
+          <h3>Connected Devices <span id="peer-count" class="badge">0</span></h3>
+          <div id="peers-list" class="peers-list">
+            <div class="no-peers">
+              <p>Waiting for others to join...</p>
+              <p class="hint">Share the room link or QR code</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- File Drop Zone -->
+        <div id="drop-zone" class="drop-zone" onclick="document.getElementById('file-input').click()">
+          <input type="file" id="file-input" multiple hidden />
+          <div class="drop-zone-content">
+            <div class="drop-icon">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            </div>
+            <p class="drop-text">Drop files here or <span class="browse-link">browse</span></p>
+            <p class="drop-hint">Any file type, up to 20GB+</p>
+          </div>
+        </div>
+
+        <!-- Transfer Queue -->
+        <div id="transfers-section" class="transfers-section hidden">
+          <h3>Transfers</h3>
+          <div id="transfers-list" class="transfers-list"></div>
+        </div>
+
+        <!-- Received Files -->
+        <div id="received-section" class="received-section hidden">
+          <h3>Received Files</h3>
+          <div id="received-list" class="received-list"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
+  </div>
+
+  <script src="/js/crypto.js"></script>
+  <script src="/js/peer.js"></script>
+  <script src="/js/transfer.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
