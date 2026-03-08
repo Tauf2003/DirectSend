@@ -375,8 +375,7 @@ class PeerManager {
     }
 
     const dc = peer.dataChannel;
-    await this._waitForWritableBuffer(dc, 32 * 1024 * 1024);
-    dc.send(data);
+    await this._sendWithBackpressure(dc, data);
   }
 
   async sendFramesToPeer(peerId, frames) {
@@ -386,10 +385,29 @@ class PeerManager {
     }
 
     const dc = peer.dataChannel;
-    await this._waitForWritableBuffer(dc, 32 * 1024 * 1024);
-
     for (const frame of frames) {
-      dc.send(frame);
+      await this._sendWithBackpressure(dc, frame);
+    }
+  }
+
+  async _sendWithBackpressure(dc, payload, highWatermark = 16 * 1024 * 1024, maxRetries = 10) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      await this._waitForWritableBuffer(dc, highWatermark);
+
+      try {
+        dc.send(payload);
+        return;
+      } catch (error) {
+        const message = String(error?.message || '');
+        const queueFull =
+          error?.name === 'OperationError' || /send queue is full/i.test(message);
+
+        if (!queueFull || attempt === maxRetries) {
+          throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, Math.min(300, 20 * (attempt + 1))));
+      }
     }
   }
 
