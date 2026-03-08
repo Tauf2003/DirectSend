@@ -289,7 +289,7 @@ class PeerManager {
 
   _setupDataChannel(dc, peerId) {
     dc.binaryType = 'arraybuffer';
-    dc.bufferedAmountLowThreshold = 4 * 1024 * 1024;
+    dc.bufferedAmountLowThreshold = 512 * 1024;
 
     dc.onopen = () => {
       console.log(`[DC] Data channel open with ${peerId}`);
@@ -390,7 +390,7 @@ class PeerManager {
     }
   }
 
-  async _sendWithBackpressure(dc, payload, highWatermark = 16 * 1024 * 1024, maxRetries = 10) {
+  async _sendWithBackpressure(dc, payload, highWatermark = 2 * 1024 * 1024, maxRetries = 40) {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       await this._waitForWritableBuffer(dc, highWatermark);
 
@@ -406,7 +406,7 @@ class PeerManager {
           throw error;
         }
 
-        await new Promise((resolve) => setTimeout(resolve, Math.min(300, 20 * (attempt + 1))));
+        await new Promise((resolve) => setTimeout(resolve, Math.min(500, 25 * (attempt + 1))));
       }
     }
   }

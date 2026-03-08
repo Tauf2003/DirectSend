@@ -6,8 +6,8 @@
 
 class TransferEngine {
   constructor() {
-    // Chunk size: 256KB for higher throughput with modern browsers
-    this.CHUNK_SIZE = 256 * 1024;
+    // Safer default for large-file reliability across varied devices/networks
+    this.CHUNK_SIZE = 128 * 1024;
     this.PROGRESS_UPDATE_INTERVAL_MS = 200;
 
     // Active outgoing transfers: transferId -> { file, state, ... }
@@ -133,7 +133,7 @@ class TransferEngine {
       await Promise.all(
         [...transfer.peers].map(async (peerId) => {
           try {
-            await peerManager.sendFramesToPeer(peerId, [header, chunkData]);
+            await this._sendChunkToPeerWithRetries(peerId, [header, chunkData]);
           } catch (e) {
             console.error(`Error sending chunk to ${peerId}:`, e);
             failedPeers.push(peerId);
@@ -202,6 +202,31 @@ class TransferEngine {
     if (this.onTransferStateChange) {
       this.onTransferStateChange(transferId, 'completed');
     }
+  }
+
+  async _sendChunkToPeerWithRetries(peerId, frames) {
+    const maxAttempts = 8;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        await peerManager.sendFramesToPeer(peerId, frames);
+        return;
+      } catch (error) {
+        if (!this._isQueueFullError(error)) {
+          throw error;
+        }
+
+        const delay = Math.min(700, 60 * (attempt + 1));
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+
+    throw new Error(`Send queue remained full for peer ${peerId}`);
+  }
+
+  _isQueueFullError(error) {
+    const message = String(error?.message || '');
+    return error?.name === 'OperationError' || /send queue is full/i.test(message);
   }
 
   /**
