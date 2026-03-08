@@ -8,12 +8,14 @@ class PeerManager {
     this.ws = null;
     this.myPeerId = null;
     this.roomId = null;
+    this.roomPassword = '';
     this.peers = new Map();
     this.onPeerConnected = null;
     this.onPeerDisconnected = null;
     this.onDataChannel = null;
     this.onFileOffer = null;
     this.onConnectionStateChange = null;
+    this.onJoinError = null;
 
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
@@ -31,8 +33,9 @@ class PeerManager {
     };
   }
 
-  connect(roomId) {
+  connect(roomId, roomPassword = '') {
     this.roomId = roomId;
+    this.roomPassword = typeof roomPassword === 'string' ? roomPassword : '';
     this._ensureIceConfig().finally(() => {
       this._connectWebSocket(roomId);
     });
@@ -73,7 +76,7 @@ class PeerManager {
     this.ws.onopen = () => {
       console.log('[WS] Connected to signaling server');
       this.reconnectAttempts = 0;
-      this.ws.send(JSON.stringify({ type: 'join', roomId }));
+      this.ws.send(JSON.stringify({ type: 'join', roomId, password: this.roomPassword }));
     };
 
     this.ws.onmessage = (event) => {
@@ -106,7 +109,7 @@ class PeerManager {
 
     setTimeout(() => {
       if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
-        this.connect(this.roomId);
+        this.connect(this.roomId, this.roomPassword);
       }
     }, delay);
   }
@@ -123,6 +126,17 @@ class PeerManager {
 
         for (const peerId of msg.peers) {
           await this._createPeerConnection(peerId, true);
+        }
+        break;
+      }
+
+      case 'join-error': {
+        console.warn('[Room] Join failed:', msg.code || msg.message);
+        if (this.onJoinError) {
+          this.onJoinError({ code: msg.code, message: msg.message });
+        }
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.close();
         }
         break;
       }

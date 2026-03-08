@@ -5,6 +5,7 @@
 
 // ─── State ──────────────────────────────────────────────────────
 let currentRoom = null;
+let currentRoomPassword = '';
 let encryptionPassword = null;
 
 // ─── Initialization ─────────────────────────────────────────────
@@ -29,6 +30,7 @@ function navigateHome() {
     peerManager.disconnect();
   }
   currentRoom = null;
+  currentRoomPassword = '';
   history.pushState(null, '', '/');
 }
 
@@ -41,9 +43,12 @@ function showView(viewId) {
 
 async function createRoom() {
   try {
-    const res = await fetch('/api/create-room');
+    const passwordInput = window.prompt('Optional: Set a room password (leave empty for public room):', '');
+    const roomPassword = (passwordInput || '').trim();
+    const qs = roomPassword ? `?password=${encodeURIComponent(roomPassword)}` : '';
+    const res = await fetch(`/api/create-room${qs}`);
     const data = await res.json();
-    joinRoom(data.roomId);
+    joinRoom(data.roomId, roomPassword);
   } catch (e) {
     showToast('Failed to create room', 'error');
   }
@@ -61,7 +66,8 @@ function joinRoomFromInput() {
   const input = document.getElementById('join-room-input');
   const roomId = input.value.trim().toUpperCase();
   if (roomId.length >= 4) {
-    joinRoom(roomId);
+    const passwordInput = window.prompt('Enter room password (leave empty if none):', '');
+    joinRoom(roomId, (passwordInput || '').trim());
   } else {
     showToast('Enter a valid room code', 'error');
   }
@@ -74,8 +80,9 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-async function joinRoom(roomId) {
+async function joinRoom(roomId, roomPassword = '') {
   currentRoom = roomId;
+  currentRoomPassword = typeof roomPassword === 'string' ? roomPassword : '';
 
   // Update UI
   document.getElementById('room-code').textContent = roomId;
@@ -86,7 +93,7 @@ async function joinRoom(roomId) {
   updateConnectionStatus('connecting');
 
   // Connect to signaling server
-  peerManager.connect(roomId);
+  peerManager.connect(roomId, currentRoomPassword);
 
   showToast(`Joined room ${roomId}`, 'success');
 }
@@ -96,6 +103,23 @@ async function joinRoom(roomId) {
 function setupPeerCallbacks() {
   peerManager.onConnectionStateChange = (state) => {
     updateConnectionStatus(state);
+  };
+
+  peerManager.onJoinError = (error) => {
+    if (error?.code === 'INVALID_ROOM_PASSWORD') {
+      const nextPassword = window.prompt('Wrong room password. Please enter the correct password:', '');
+      if (nextPassword === null) {
+        showToast('Join cancelled', 'info');
+        navigateHome();
+        return;
+      }
+      showToast('Retrying with new password...', 'info');
+      joinRoom(currentRoom, (nextPassword || '').trim());
+      return;
+    }
+
+    showToast(error?.message || 'Failed to join room', 'error');
+    navigateHome();
   };
 
   peerManager.onPeerConnected = (peerId) => {

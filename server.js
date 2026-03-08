@@ -26,7 +26,8 @@ const wss = new WebSocketServer({ server });
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── Room Management ───────────────────────────────────────────
-const rooms = new Map(); // roomId -> Map<peerId, ws>
+// roomId -> { peers: Map<peerId, ws>, passwordHash: string|null }
+const rooms = new Map();
 
 function buildIceServers() {
   const defaultStunServers = [
@@ -65,8 +66,8 @@ function buildIceServers() {
 
 // Clean up empty rooms periodically
 setInterval(() => {
-  for (const [roomId, peers] of rooms) {
-    if (peers.size === 0) {
+  for (const [roomId, room] of rooms) {
+    if (room.peers.size === 0) {
       rooms.delete(roomId);
     }
   }
@@ -77,8 +78,12 @@ setInterval(() => {
 // Create a new room
 app.get('/api/create-room', (req, res) => {
   const roomId = generateRoomId();
-  rooms.set(roomId, new Map());
-  res.json({ roomId });
+  const password = normalizePassword(req.query.password);
+  rooms.set(roomId, {
+    peers: new Map(),
+    passwordHash: password ? hashPassword(password) : null,
+  });
+  res.json({ roomId, protected: Boolean(password) });
 });
 
 // Health endpoint for Render checks and quick diagnostics
@@ -100,8 +105,9 @@ app.get('/', (req, res) => {
 app.get('/api/room/:roomId', (req, res) => {
   const { roomId } = req.params;
   const exists = rooms.has(roomId);
-  const peerCount = exists ? rooms.get(roomId).size : 0;
-  res.json({ exists, peerCount });
+  const room = exists ? rooms.get(roomId) : null;
+  const peerCount = room ? room.peers.size : 0;
+  res.json({ exists, peerCount, protected: Boolean(room?.passwordHash) });
 });
 
 // Generate QR code for a room
@@ -148,19 +154,35 @@ wss.on('connection', (ws) => {
 
     switch (msg.type) {
       case 'join': {
-        const { roomId } = msg;
+        const { roomId, password } = msg;
         if (!roomId) return;
 
         // Create room if it doesn't exist
         if (!rooms.has(roomId)) {
-          rooms.set(roomId, new Map());
+          const normalizedPassword = normalizePassword(password);
+          rooms.set(roomId, {
+            peers: new Map(),
+            passwordHash: normalizedPassword ? hashPassword(normalizedPassword) : null,
+          });
         }
 
         const room = rooms.get(roomId);
+        const normalizedPassword = normalizePassword(password);
+        const incomingHash = normalizedPassword ? hashPassword(normalizedPassword) : null;
+
+        if (room.passwordHash && room.passwordHash !== incomingHash) {
+          send(ws, {
+            type: 'join-error',
+            code: 'INVALID_ROOM_PASSWORD',
+            message: 'Invalid room password',
+          });
+          return;
+        }
+
         currentRoom = roomId;
 
         // Notify existing peers about new peer
-        for (const [existingPeerId, existingWs] of room) {
+        for (const [existingPeerId, existingWs] of room.peers) {
           send(existingWs, {
             type: 'peer-joined',
             peerId,
@@ -168,7 +190,7 @@ wss.on('connection', (ws) => {
         }
 
         // Send existing peers list to new peer
-        const existingPeers = Array.from(room.keys());
+        const existingPeers = Array.from(room.peers.keys());
         send(ws, {
           type: 'room-joined',
           roomId,
@@ -176,7 +198,7 @@ wss.on('connection', (ws) => {
           peers: existingPeers,
         });
 
-        room.set(peerId, ws);
+        room.peers.set(peerId, ws);
         break;
       }
 
@@ -188,7 +210,7 @@ wss.on('connection', (ws) => {
         if (!currentRoom || !targetPeerId) return;
         const room = rooms.get(currentRoom);
         if (!room) return;
-        const targetWs = room.get(targetPeerId);
+        const targetWs = room.peers.get(targetPeerId);
         if (targetWs && targetWs.readyState === 1) {
           send(targetWs, { ...msg, fromPeerId: peerId });
         }
@@ -201,7 +223,7 @@ wss.on('connection', (ws) => {
         if (!currentRoom || !targetPeerId) return;
         const room = rooms.get(currentRoom);
         if (!room) return;
-        const targetWs = room.get(targetPeerId);
+        const targetWs = room.peers.get(targetPeerId);
         if (targetWs && targetWs.readyState === 1) {
           send(targetWs, { ...msg, fromPeerId: peerId });
         }
@@ -214,7 +236,7 @@ wss.on('connection', (ws) => {
         if (!currentRoom || !targetPeerId) return;
         const room = rooms.get(currentRoom);
         if (!room) return;
-        const targetWs = room.get(targetPeerId);
+        const targetWs = room.peers.get(targetPeerId);
         if (targetWs && targetWs.readyState === 1) {
           send(targetWs, { ...msg, fromPeerId: peerId });
         }
@@ -226,12 +248,12 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (currentRoom && rooms.has(currentRoom)) {
       const room = rooms.get(currentRoom);
-      room.delete(peerId);
+      room.peers.delete(peerId);
       // Notify remaining peers
-      for (const [, peerWs] of room) {
+      for (const [, peerWs] of room.peers) {
         send(peerWs, { type: 'peer-left', peerId });
       }
-      if (room.size === 0) {
+      if (room.peers.size === 0) {
         rooms.delete(currentRoom);
       }
     }
@@ -264,6 +286,17 @@ function generateRoomId() {
     id += chars[Math.floor(Math.random() * chars.length)];
   }
   return id;
+}
+
+function normalizePassword(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value.trim().slice(0, 128);
+}
+
+function hashPassword(password) {
+  return crypto.createHash('sha256').update(password).digest('hex');
 }
 
 function getLocalIPv4Addresses() {
