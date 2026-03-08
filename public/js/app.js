@@ -6,10 +6,15 @@
 // ─── State ──────────────────────────────────────────────────────
 let currentRoom = null;
 let currentRoomPassword = '';
+let lanTurboEnabled = false;
+let lastNetworkPath = null;
 let encryptionPassword = null;
 
 // ─── Initialization ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  lanTurboEnabled = localStorage.getItem('ds_lan_turbo') === '1';
+  updateLanTurboUI();
+
   // Check if URL has a room path
   const pathMatch = location.pathname.match(/^\/room\/([A-Z0-9]+)$/i);
   if (pathMatch) {
@@ -31,12 +36,66 @@ function navigateHome() {
   }
   currentRoom = null;
   currentRoomPassword = '';
+  lastNetworkPath = null;
   history.pushState(null, '', '/');
 }
 
 function showView(viewId) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(viewId).classList.add('active');
+}
+
+function toggleLanTurboMode() {
+  lanTurboEnabled = !lanTurboEnabled;
+  localStorage.setItem('ds_lan_turbo', lanTurboEnabled ? '1' : '0');
+  updateLanTurboUI();
+
+  if (currentRoom) {
+    showToast(`LAN Turbo ${lanTurboEnabled ? 'enabled' : 'disabled'} — reconnecting...`, 'info');
+    peerManager.disconnect();
+    updateConnectionStatus('connecting');
+    peerManager.connect(currentRoom, currentRoomPassword, { lanTurboEnabled });
+  }
+}
+
+function updateLanTurboUI() {
+  const button = document.getElementById('lan-turbo-btn');
+  if (!button) return;
+
+  button.classList.toggle('active', lanTurboEnabled);
+  button.title = lanTurboEnabled ? 'LAN Turbo: On' : 'LAN Turbo: Off';
+}
+
+function updateNetworkPath(path) {
+  const label = document.getElementById('network-path-label');
+  if (!label) return;
+
+  const normalizedPath = ['lan-direct', 'relay', 'direct'].includes(path) ? path : 'auto';
+
+  if (lastNetworkPath !== normalizedPath) {
+    if (normalizedPath === 'lan-direct') {
+      showToast('LAN Direct path active ⚡', 'success');
+    } else if (normalizedPath === 'relay') {
+      showToast('Using relay path (internet route)', 'info');
+    } else if (normalizedPath === 'direct') {
+      showToast('Direct path active', 'success');
+    }
+    lastNetworkPath = normalizedPath;
+  }
+
+  if (path === 'lan-direct') {
+    label.textContent = 'Path: LAN Direct';
+    return;
+  }
+  if (path === 'relay') {
+    label.textContent = 'Path: Relay';
+    return;
+  }
+  if (path === 'direct') {
+    label.textContent = 'Path: Direct';
+    return;
+  }
+  label.textContent = 'Path: Auto';
 }
 
 // ─── Room Management ────────────────────────────────────────────
@@ -83,6 +142,7 @@ document.addEventListener('keydown', (e) => {
 async function joinRoom(roomId, roomPassword = '') {
   currentRoom = roomId;
   currentRoomPassword = typeof roomPassword === 'string' ? roomPassword : '';
+  lastNetworkPath = null;
 
   // Update UI
   document.getElementById('room-code').textContent = roomId;
@@ -93,7 +153,7 @@ async function joinRoom(roomId, roomPassword = '') {
   updateConnectionStatus('connecting');
 
   // Connect to signaling server
-  peerManager.connect(roomId, currentRoomPassword);
+  peerManager.connect(roomId, currentRoomPassword, { lanTurboEnabled });
 
   showToast(`Joined room ${roomId}`, 'success');
 }
@@ -125,6 +185,10 @@ function setupPeerCallbacks() {
   peerManager.onPeerConnected = (peerId) => {
     updatePeersList();
     showToast('A device connected!', 'success');
+  };
+
+  peerManager.onNetworkPathChange = (_peerId, path) => {
+    updateNetworkPath(path);
   };
 
   peerManager.onPeerDisconnected = (peerId) => {

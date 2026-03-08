@@ -255,6 +255,16 @@ header {
   border-color: var(--accent);
 }
 
+.btn-icon.active {
+  background: rgba(108, 99, 255, 0.2);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.room-status .badge {
+  margin-left: 0.5rem;
+}
+
 .btn-sm {
   padding: 0.4rem 0.8rem;
   font-size: 0.8rem;

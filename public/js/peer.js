@@ -16,29 +16,50 @@ class PeerManager {
     this.onFileOffer = null;
     this.onConnectionStateChange = null;
     this.onJoinError = null;
+    this.onNetworkPathChange = null;
+    this.lanTurboEnabled = false;
 
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 10;
     this.reconnectDelay = 1000;
 
     this.iceConfigLoaded = false;
-    this.rtcConfig = {
-      iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' }
-      ]
-    };
+    this.serverIceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:stun4.l.google.com:19302' }
+    ];
+    this.rtcConfig = { iceServers: this.serverIceServers };
   }
 
-  connect(roomId, roomPassword = '') {
+  connect(roomId, roomPassword = '', options = {}) {
     this.roomId = roomId;
     this.roomPassword = typeof roomPassword === 'string' ? roomPassword : '';
+    this.lanTurboEnabled = Boolean(options?.lanTurboEnabled);
     this._ensureIceConfig().finally(() => {
+      this._applyRtcConfig();
       this._connectWebSocket(roomId);
     });
+  }
+
+  _applyRtcConfig() {
+    let iceServers = this.serverIceServers;
+
+    if (this.lanTurboEnabled) {
+      iceServers = iceServers.filter((entry) => {
+        const urls = Array.isArray(entry.urls) ? entry.urls : [entry.urls];
+        return !urls.some((url) => String(url).toLowerCase().startsWith('turn:'));
+      });
+    }
+
+    this.rtcConfig = {
+      iceServers,
+      iceCandidatePoolSize: this.lanTurboEnabled ? 8 : 4,
+    };
+
+    console.log(`[RTC] Mode: ${this.lanTurboEnabled ? 'LAN Turbo' : 'Normal'}`);
   }
 
   async _ensureIceConfig() {
@@ -54,7 +75,7 @@ class PeerManager {
 
       const data = await res.json();
       if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
-        this.rtcConfig = { iceServers: data.iceServers };
+        this.serverIceServers = data.iceServers;
         console.log('[RTC] Loaded ICE config from server');
       }
       this.iceConfigLoaded = true;
@@ -109,7 +130,7 @@ class PeerManager {
 
     setTimeout(() => {
       if (!this.ws || this.ws.readyState === WebSocket.CLOSED) {
-        this.connect(this.roomId, this.roomPassword);
+        this.connect(this.roomId, this.roomPassword, { lanTurboEnabled: this.lanTurboEnabled });
       }
     }, delay);
   }
@@ -217,6 +238,10 @@ class PeerManager {
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        if (this.lanTurboEnabled && this._isRelayCandidate(event.candidate.candidate)) {
+          return;
+        }
+
         this._signal({
           type: 'ice-candidate',
           targetPeerId: peerId,
@@ -229,6 +254,7 @@ class PeerManager {
       console.log(`[RTC] Connection state with ${peerId}: ${pc.connectionState}`);
       if (pc.connectionState === 'connected') {
         peerInfo.state = 'connected';
+        this._reportConnectionPath(peerId, pc);
       } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
         peerInfo.state = 'disconnected';
         setTimeout(() => {
@@ -285,6 +311,53 @@ class PeerManager {
     dc.onerror = (error) => {
       console.error(`[DC] Data channel error with ${peerId}:`, error);
     };
+  }
+
+  _isRelayCandidate(candidateLine) {
+    return / typ relay /i.test(String(candidateLine || ''));
+  }
+
+  async _reportConnectionPath(peerId, pc) {
+    try {
+      const stats = await pc.getStats();
+      let selectedPair = null;
+
+      stats.forEach((report) => {
+        if (report.type === 'transport' && report.selectedCandidatePairId) {
+          selectedPair = stats.get(report.selectedCandidatePairId) || selectedPair;
+        }
+      });
+
+      if (!selectedPair) {
+        stats.forEach((report) => {
+          if (report.type === 'candidate-pair' && report.state === 'succeeded' && report.nominated) {
+            selectedPair = report;
+          }
+        });
+      }
+
+      if (!selectedPair) {
+        return;
+      }
+
+      const local = stats.get(selectedPair.localCandidateId);
+      const remote = stats.get(selectedPair.remoteCandidateId);
+      const localType = local?.candidateType || '';
+      const remoteType = remote?.candidateType || '';
+
+      let path = 'direct';
+      if (localType === 'relay' || remoteType === 'relay') {
+        path = 'relay';
+      } else if (localType === 'host' && remoteType === 'host') {
+        path = 'lan-direct';
+      }
+
+      if (this.onNetworkPathChange) {
+        this.onNetworkPathChange(peerId, path);
+      }
+    } catch (error) {
+      console.warn('[RTC] Failed to resolve network path:', error);
+    }
   }
 
   _shouldInitiateConnection(peerId) {
