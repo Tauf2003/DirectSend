@@ -42,6 +42,12 @@
             <input type="text" id="join-room-input" placeholder="Enter room code (e.g. ABCD123)" maxlength="7" autocomplete="off" />
             <button onclick="joinRoomFromInput()" class="btn-primary">Join</button>
           </div>
+          <div class="scan-join-row">
+            <button onclick="openQRScannerModal()" class="scan-join-btn" title="Scan QR Code">
+              <span class="scan-join-icon">📷</span>
+              <span>Scan QR to Join</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -149,6 +155,16 @@
         </div>
       </div>
     </section>
+
+    <!-- QR Scanner Modal -->
+    <div id="qr-scan-modal" class="modal hidden">
+      <div class="modal-content qr-scan-modal-content">
+        <button class="modal-close" onclick="closeQRScannerModal()">&times;</button>
+        <h3>Scan Room QR</h3>
+        <video id="qr-scan-video" class="qr-scan-video" playsinline autoplay muted></video>
+        <p id="qr-scan-status" class="qr-scan-status">Point camera at a DirectSend QR code</p>
+      </div>
+    </div>
 
     <!-- Toast Notifications -->
     <div id="toast-container" class="toast-container"></div>

@@ -5,6 +5,13 @@ const esbuild = require('esbuild');
 async function buildClientBundle() {
   const root = path.resolve(__dirname, '..');
   const jsDir = path.join(root, 'public', 'js');
+  const jsQrPath = path.join(root, 'node_modules', 'jsqr', 'dist', 'jsQR.js');
+
+  if (!fs.existsSync(jsQrPath)) {
+    throw new Error('Missing jsQR dependency. Run: npm install');
+  }
+
+  const jsQrSource = fs.readFileSync(jsQrPath, 'utf8');
 
   const orderedFiles = ['crypto.js', 'peer.js', 'transfer.js', 'app.js'];
 
@@ -16,7 +23,7 @@ async function buildClientBundle() {
     return fs.readFileSync(full, 'utf8');
   });
 
-  const source = parts.join('\n;\n');
+  const source = [jsQrSource, ...parts].join('\n;\n');
 
   const result = await esbuild.transform(source, {
     loader: 'js',

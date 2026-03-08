@@ -180,6 +180,41 @@ header {
   margin-top: 1rem;
 }
 
+.scan-join-row {
+  margin-top: 0.65rem;
+  display: flex;
+  justify-content: center;
+}
+
+.scan-join-btn {
+  width: 100%;
+  max-width: 350px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  font-family: var(--font);
+}
+
+.scan-join-btn:hover {
+  background: var(--bg-card-hover);
+  border-color: var(--accent);
+}
+
+.scan-join-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .input-group {
   display: flex;
   gap: 0.5rem;
@@ -681,6 +716,27 @@ header {
   word-break: break-all;
 }
 
+.qr-scan-modal-content {
+  width: min(92vw, 420px);
+}
+
+.qr-scan-video {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: #000;
+  object-fit: cover;
+  margin-top: 0.4rem;
+}
+
+.qr-scan-status {
+  margin-top: 0.7rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  min-height: 1.4rem;
+}
+
 /* ─── Toast ─────────────────────────────────────────────────── */
 .toast-container {
   position: fixed;
@@ -742,6 +798,9 @@ header {
     max-width: 100%;
     width: 100%;
     padding: 1.5rem;
+  }
+  .scan-join-btn {
+    max-width: 100%;
   }
   .features-grid {
     grid-template-columns: 1fr 1fr;

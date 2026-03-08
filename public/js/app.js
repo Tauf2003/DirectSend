@@ -9,6 +9,12 @@ let currentRoomPassword = '';
 let lanTurboEnabled = false;
 let lastNetworkPath = null;
 let encryptionPassword = null;
+let qrScanStream = null;
+let qrScanDetector = null;
+let qrScanActive = false;
+let qrScanRafId = null;
+let qrScanCanvas = null;
+let qrScanCtx = null;
 
 // ─── Initialization ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -121,6 +127,157 @@ function showJoinDialog() {
   }
 }
 
+async function openQRScannerModal() {
+  const modal = document.getElementById('qr-scan-modal');
+  const video = document.getElementById('qr-scan-video');
+  const status = document.getElementById('qr-scan-status');
+
+  if (!modal || !video || !status) {
+    showToast('QR scanner UI missing', 'error');
+    return;
+  }
+
+  modal.classList.remove('hidden');
+  status.textContent = 'Opening camera...';
+
+  const hasNativeDetector = 'BarcodeDetector' in window;
+  const hasJsQrFallback = typeof window.jsQR === 'function';
+
+  if (!hasNativeDetector && !hasJsQrFallback) {
+    status.textContent = 'QR scan not supported on this browser. Enter room code manually.';
+    return;
+  }
+
+  try {
+    if (hasNativeDetector && !qrScanDetector) {
+      qrScanDetector = new BarcodeDetector({ formats: ['qr_code'] });
+    }
+
+    if (!qrScanCanvas) {
+      qrScanCanvas = document.createElement('canvas');
+      qrScanCtx = qrScanCanvas.getContext('2d', { willReadFrequently: true });
+    }
+
+    qrScanStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false,
+    });
+
+    video.srcObject = qrScanStream;
+    await video.play();
+    qrScanActive = true;
+    status.textContent = 'Point camera at a DirectSend QR code';
+    _runQrScanLoop();
+  } catch (error) {
+    status.textContent = 'Camera permission denied or unavailable';
+    showToast('Unable to access camera', 'error');
+  }
+}
+
+function closeQRScannerModal() {
+  const modal = document.getElementById('qr-scan-modal');
+  const video = document.getElementById('qr-scan-video');
+
+  qrScanActive = false;
+
+  if (qrScanRafId) {
+    cancelAnimationFrame(qrScanRafId);
+    qrScanRafId = null;
+  }
+
+  if (qrScanStream) {
+    for (const track of qrScanStream.getTracks()) {
+      track.stop();
+    }
+    qrScanStream = null;
+  }
+
+  if (video) {
+    video.srcObject = null;
+  }
+
+  if (modal) {
+    modal.classList.add('hidden');
+  }
+}
+
+async function _runQrScanLoop() {
+  if (!qrScanActive) {
+    return;
+  }
+
+  const video = document.getElementById('qr-scan-video');
+  const status = document.getElementById('qr-scan-status');
+
+  try {
+    if (video && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+      let scannedValue = '';
+
+      if (qrScanDetector) {
+        const barcodes = await qrScanDetector.detect(video);
+        if (barcodes.length > 0) {
+          scannedValue = String(barcodes[0].rawValue || '').trim();
+        }
+      } else if (typeof window.jsQR === 'function' && qrScanCanvas && qrScanCtx) {
+        const frameW = video.videoWidth;
+        const frameH = video.videoHeight;
+        if (frameW > 0 && frameH > 0) {
+          qrScanCanvas.width = frameW;
+          qrScanCanvas.height = frameH;
+          qrScanCtx.drawImage(video, 0, 0, frameW, frameH);
+          const imageData = qrScanCtx.getImageData(0, 0, frameW, frameH);
+          const code = window.jsQR(imageData.data, frameW, frameH, { inversionAttempts: 'dontInvert' });
+          if (code?.data) {
+            scannedValue = String(code.data).trim();
+          }
+        }
+      }
+
+      if (scannedValue) {
+        const roomId = _extractRoomIdFromQrValue(scannedValue);
+
+        if (roomId) {
+          if (status) {
+            status.textContent = `Found room ${roomId}, joining...`;
+          }
+          closeQRScannerModal();
+          joinRoom(roomId);
+          return;
+        }
+
+        if (status) {
+          status.textContent = 'Invalid QR code for DirectSend room';
+        }
+      }
+    }
+  } catch {
+    if (status) {
+      status.textContent = 'Scanning...';
+    }
+  }
+
+  qrScanRafId = requestAnimationFrame(_runQrScanLoop);
+}
+
+function _extractRoomIdFromQrValue(value) {
+  const directCode = value.match(/^[A-Z0-9]{4,12}$/i);
+  if (directCode) {
+    return directCode[0].toUpperCase();
+  }
+
+  try {
+    const url = new URL(value);
+    const pathMatch = url.pathname.match(/^\/room\/([A-Z0-9]+)$/i);
+    if (pathMatch) {
+      return pathMatch[1].toUpperCase();
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
 function joinRoomFromInput() {
   const input = document.getElementById('join-room-input');
   const roomId = input.value.trim().toUpperCase();
@@ -136,6 +293,13 @@ function joinRoomFromInput() {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && document.activeElement.id === 'join-room-input') {
     joinRoomFromInput();
+  }
+
+  if (e.key === 'Escape') {
+    const scanModal = document.getElementById('qr-scan-modal');
+    if (scanModal && !scanModal.classList.contains('hidden')) {
+      closeQRScannerModal();
+    }
   }
 });
 
@@ -284,7 +448,11 @@ function closeQRModal() {
 // Close modal on backdrop click
 document.addEventListener('click', (e) => {
   if (e.target.classList.contains('modal')) {
-    e.target.classList.add('hidden');
+    if (e.target.id === 'qr-scan-modal') {
+      closeQRScannerModal();
+    } else {
+      e.target.classList.add('hidden');
+    }
   }
 });
 
