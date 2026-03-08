@@ -140,3 +140,6 @@ vite.config.ts.timestamp-*
 .DS_Store
 Thumbs.db
 .vscode/
+
+# Generated client bundle (built on Render/build step)
+public/js/app.bundle.min.js

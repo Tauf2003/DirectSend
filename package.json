@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
+    "build:client": "node scripts/build-client.js",
     "start": "node server.js",
+    "start:with-build": "npm run build:client && node server.js",
     "dev": "node server.js"
   },
   "keywords": ["p2p", "file-transfer", "webrtc"],
@@ -15,5 +17,8 @@
     "qrcode": "^1.5.4",
     "uuid": "^13.0.0",
     "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.10"
   }
 }
